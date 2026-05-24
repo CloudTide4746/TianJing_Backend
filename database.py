@@ -9,10 +9,25 @@ from typing import Optional
 
 DB_PATH = Path(__file__).parent / "data.db"
 
+TEXT_FIELDS = (
+    "title", "subtitle", "short_description", "site_name", "province", "district",
+    "era_label", "hero_url", "thumbnail_url", "share_url", "image_alt", "story",
+    "collector_note", "golden_line", "call_to_action", "earliest_imprint",
+    "location_name", "weather_condition", "wind_direction", "aqi_level", "slug",
+)
+
+
+def _sanitize_str(s: str) -> str:
+    """Strip lone surrogates and re-encode to guarantee valid UTF-8."""
+    if not isinstance(s, str):
+        return s
+    return s.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")
+
 
 def get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.text_factory = lambda x: x.decode("utf-8", errors="replace")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
@@ -149,6 +164,10 @@ def insert_collectible(data: dict) -> dict:
     data["is_favorite"] = 1 if data["is_favorite"] else 0
     data["is_featured"] = 1 if data["is_featured"] else 0
 
+    for f in TEXT_FIELDS:
+        if f in data and isinstance(data[f], str):
+            data[f] = _sanitize_str(data[f])
+
     columns = [
         "id", "slug", "kind", "location_style", "title", "subtitle",
         "short_description", "site_name", "province", "district", "era_label",
@@ -180,6 +199,10 @@ def update_collectible(collectible_id: str, data: dict) -> Optional[dict]:
         data["is_favorite"] = 1 if data["is_favorite"] else 0
     if "is_featured" in data:
         data["is_featured"] = 1 if data["is_featured"] else 0
+
+    for f in TEXT_FIELDS:
+        if f in data and isinstance(data[f], str):
+            data[f] = _sanitize_str(data[f])
 
     set_clauses = [f"{k} = :{k}" for k in data.keys()]
     data["id"] = collectible_id
