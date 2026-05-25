@@ -1,7 +1,4 @@
-"""刻迹 — FastAPI Backend.
-
-Run: uvicorn main:app --reload --host 0.0.0.0 --port 8000
-"""
+"""刻迹 — FastAPI Backend — Vercel compatible."""
 
 from __future__ import annotations
 
@@ -11,21 +8,21 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from starlette.formparsers import MultiPartParser
-from starlette.requests import Request
-
-# Increase multipart part size limit: 1MB → 10MB (for base64 photos)
-_10MB = 10 * 1024 * 1024
-MultiPartParser.__init__.__kwdefaults__["max_part_size"] = _10MB
-Request.form.__kwdefaults__["max_part_size"] = _10MB
-Request._get_form.__kwdefaults__["max_part_size"] = _10MB
+try:
+    from starlette.formparsers import MultiPartParser
+    from starlette.requests import Request
+    _10MB = 10 * 1024 * 1024
+    MultiPartParser.__init__.__kwdefaults__["max_part_size"] = _10MB
+    Request.form.__kwdefaults__["max_part_size"] = _10MB
+    Request._get_form.__kwdefaults__["max_part_size"] = _10MB
+except Exception:
+    pass
 
 from database import init_db, shutdown_executor
 from routers import collectibles, location, generate, qrcode
 
 app = FastAPI(title="刻迹 API", version="1.0.0")
 
-# CORS — allow Expo dev clients
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -34,12 +31,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Static files — serve uploaded photos (only if uploads dir exists)
 uploads_dir = Path(__file__).parent / "uploads"
-if uploads_dir.exists():
-    app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
+uploads_dir.mkdir(exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 
-# Routers
 app.include_router(collectibles.router)
 app.include_router(location.router)
 app.include_router(generate.router)
@@ -48,7 +43,6 @@ app.include_router(qrcode.router)
 
 @app.on_event("startup")
 def on_startup():
-    uploads_dir.mkdir(exist_ok=True)
     init_db()
 
 
@@ -64,9 +58,9 @@ def health():
 
 @app.get("/")
 def root():
-    return {"msg": "刻迹 API", "version": "1.0.0"}
+    return {"msg": "keji API", "version": "1.0.0"}
 
 
-# Vercel serverless handler — ASGI callable interface
+# Vercel ASGI handler
 async def handler(scope, receive, send):
     await app(scope, receive, send)
