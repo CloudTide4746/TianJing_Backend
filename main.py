@@ -15,8 +15,6 @@ from starlette.formparsers import MultiPartParser
 from starlette.requests import Request
 
 # Increase multipart part size limit: 1MB → 10MB (for base64 photos)
-# Starlette 0.50+ passes max_part_size explicitly through the call chain, so
-# we must patch all three defaults: Request.form → Request._get_form → MultiPartParser
 _10MB = 10 * 1024 * 1024
 MultiPartParser.__init__.__kwdefaults__["max_part_size"] = _10MB
 Request.form.__kwdefaults__["max_part_size"] = _10MB
@@ -36,10 +34,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Static files — serve uploaded photos
+# Static files — serve uploaded photos (only if uploads dir exists)
 uploads_dir = Path(__file__).parent / "uploads"
-uploads_dir.mkdir(exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
+if uploads_dir.exists():
+    app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 
 # Routers
 app.include_router(collectibles.router)
@@ -50,6 +48,7 @@ app.include_router(qrcode.router)
 
 @app.on_event("startup")
 def on_startup():
+    uploads_dir.mkdir(exist_ok=True)
     init_db()
 
 
@@ -61,3 +60,13 @@ def on_shutdown():
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/")
+def root():
+    return {"msg": "刻迹 API", "version": "1.0.0"}
+
+
+# Vercel serverless handler — ASGI callable interface
+async def handler(scope, receive, send):
+    await app(scope, receive, send)

@@ -8,3 +8,4 @@ pillow>=10.0.0
 google-genai>=1.0.0
 pillow-heif>=0.17.0
 pydantic>=2.0.0
+starlette>=0.40.0
