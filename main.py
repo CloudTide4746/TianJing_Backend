@@ -61,6 +61,6 @@ def root():
     return {"msg": "keji API", "version": "1.0.0"}
 
 
-# Vercel ASGI handler
-async def handler(scope, receive, send):
-    await app(scope, receive, send)
+# Vercel ASGI handler — 'app' is the FastAPI ASGI instance itself
+# Vercel Python runtime auto-detects: if top-level var is ASGI app, it calls app(scope, receive, send)
+handler = app
