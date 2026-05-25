@@ -14,12 +14,12 @@ router = APIRouter(prefix="/api/share", tags=["share"])
 
 
 @router.get("/{collectible_id}/qrcode")
-def get_share_qrcode(
+async def get_share_qrcode(
     collectible_id: str,
     size: int = Query(300, ge=100, le=800),
 ):
     """Generate a QR code PNG for sharing a collectible."""
-    item = db.get_collectible_by_id(collectible_id)
+    item = await db.async_get_collectible_by_id(collectible_id)
     if not item:
         raise HTTPException(status_code=404, detail="刻迹不存在")
 

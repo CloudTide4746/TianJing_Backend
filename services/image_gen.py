@@ -12,6 +12,7 @@ Prompt weight hierarchy:
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from pathlib import Path
 
@@ -37,15 +38,18 @@ DMXAPI_MODEL = "gemini-3.1-flash-image-preview"
 UPLOAD_DIR = Path(__file__).parent.parent / "uploads"
 
 _client: genai.Client | None = None
+_client_lock = asyncio.Lock()
 
 
-def _get_client() -> genai.Client:
+async def _get_client() -> genai.Client:
     global _client
     if _client is None:
-        _client = genai.Client(
-            api_key=DMXAPI_KEY,
-            http_options={'base_url': DMXAPI_BASE_URL},
-        )
+        async with _client_lock:
+            if _client is None:
+                _client = genai.Client(
+                    api_key=DMXAPI_KEY,
+                    http_options={'base_url': DMXAPI_BASE_URL},
+                )
     return _client
 
 
@@ -367,7 +371,7 @@ async def _generate_and_save(
     image_size: str = "2K",
 ) -> str:
     """Call gemini image model via DMXAPI — matches the user's DMXAPI example pattern."""
-    client = _get_client()
+    client = await _get_client()
 
     # Build contents in the EXACT pattern from DMXAPI example: [prompt] + images
     images = []

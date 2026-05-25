@@ -22,7 +22,7 @@ MultiPartParser.__init__.__kwdefaults__["max_part_size"] = _10MB
 Request.form.__kwdefaults__["max_part_size"] = _10MB
 Request._get_form.__kwdefaults__["max_part_size"] = _10MB
 
-from database import init_db
+from database import init_db, shutdown_executor
 from routers import collectibles, location, generate, qrcode
 
 app = FastAPI(title="刻迹 API", version="1.0.0")
@@ -51,6 +51,11 @@ app.include_router(qrcode.router)
 @app.on_event("startup")
 def on_startup():
     init_db()
+
+
+@app.on_event("shutdown")
+def on_shutdown():
+    shutdown_executor()
 
 
 @app.get("/api/health")

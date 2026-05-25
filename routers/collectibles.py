@@ -112,15 +112,15 @@ def _to_list_item(data: dict) -> CollectibleListItem:
 
 
 @router.get("/", response_model=CollectibleListResponse)
-def list_collectibles(
+async def list_collectibles(
     kind: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     sort: str = Query("newest"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
-    items = db.list_collectibles(kind=kind, status=status, sort=sort, limit=limit, offset=offset)
-    total = db.count_collectibles(kind=kind, status=status)
+    items = await db.async_list_collectibles(kind=kind, status=status, sort=sort, limit=limit, offset=offset)
+    total = await db.async_count_collectibles(kind=kind, status=status)
     return CollectibleListResponse(
         items=[_to_list_item(it) for it in items],
         total=total,
@@ -128,8 +128,8 @@ def list_collectibles(
 
 
 @router.get("/timeline", response_model=list[TimelineGroup])
-def get_timeline():
-    items = db.list_collectibles(sort="newest", limit=200)
+async def get_timeline():
+    items = await db.async_list_collectibles(sort="newest", limit=200)
     groups: dict[str, list[CollectibleListItem]] = {}
     for item in items:
         try:
@@ -145,8 +145,8 @@ def get_timeline():
 
 
 @router.get("/map", response_model=list[MapPoint])
-def get_map_points():
-    items = db.list_collectibles(sort="newest", limit=200)
+async def get_map_points():
+    items = await db.async_list_collectibles(sort="newest", limit=200)
     return [
         MapPoint(
             id=it["id"],
@@ -163,8 +163,8 @@ def get_map_points():
 
 
 @router.get("/cities", response_model=list[CityAggregation])
-def get_cities():
-    items = db.list_collectibles(sort="newest", limit=500)
+async def get_cities():
+    items = await db.async_list_collectibles(sort="newest", limit=500)
     cities: dict[str, dict] = {}
     for it in items:
         city_key = f"{it.get('province', '')}-{it.get('district', '')}"
@@ -184,26 +184,26 @@ def get_cities():
 
 
 @router.get("/{collectible_id}", response_model=CollectibleOut)
-def get_collectible(collectible_id: str):
-    item = db.get_collectible_by_id(collectible_id)
+async def get_collectible(collectible_id: str):
+    item = await db.async_get_collectible_by_id(collectible_id)
     if not item:
         raise HTTPException(status_code=404, detail="刻迹不存在")
     # Increment view count without bumping updated_at
-    db.increment_view_count(collectible_id)
+    await db.async_increment_view_count(collectible_id)
     item["view_count"] = item.get("view_count", 0) + 1
     return _to_collectible_out(item)
 
 
 @router.patch("/{collectible_id}/favorite")
-def toggle_favorite(collectible_id: str):
-    result = db.toggle_favorite(collectible_id)
+async def toggle_favorite(collectible_id: str):
+    result = await db.async_toggle_favorite(collectible_id)
     if result is None:
         raise HTTPException(status_code=404, detail="刻迹不存在")
     return {"ok": True, "is_favorite": result}
 
 
 @router.delete("/{collectible_id}")
-def delete_collectible(collectible_id: str):
-    if not db.delete_collectible(collectible_id):
+async def delete_collectible(collectible_id: str):
+    if not await db.async_delete_collectible(collectible_id):
         raise HTTPException(status_code=404, detail="刻迹不存在")
     return {"ok": True}

@@ -23,11 +23,11 @@ async def get_location_info(
     aqi_data = await get_aqi(lat, lng)
 
     # Read counter without incrementing (preview only)
-    counter = db.get_or_create_location_counter(lat, lng)
+    counter = await db.async_get_or_create_location_counter(lat, lng)
 
     # Store location metadata on counter if not yet set (no increment)
     if loc.get("location_name") and not counter.get("location_name"):
-        db.update_location_counter_meta(
+        await db.async_update_location_counter_meta(
             lat, lng,
             location_name=loc["location_name"],
             province=loc["province"],
@@ -36,7 +36,7 @@ async def get_location_info(
             location_style=loc["location_style"],
             suggested_kind=loc["suggested_kind"],
         )
-        counter = db.get_or_create_location_counter(lat, lng)
+        counter = await db.async_get_or_create_location_counter(lat, lng)
 
     mint_number = int(counter.get("counter", 0))
     earliest = counter.get("earliest_imprint", "")

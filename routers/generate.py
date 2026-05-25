@@ -35,6 +35,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 # In-memory generation state (for polling)
 _generation_states: dict[str, dict] = {}
+_generation_lock = asyncio.Lock()
 
 GENERATION_PHASES = [
     {"id": "queued", "label": "锚定时空坐标", "detail": "系统正在锁定GPS、时间戳与气象数据，建立不可篡改的时空锚点。", "progress": 0.08, "tone": "textSecondary", "status": "queued", "duration_ms": 800, "can_cancel": True},
@@ -91,7 +92,7 @@ async def upload_and_create(
     aqi_data = await get_aqi(latitude, longitude)
 
     # Increment location counter for real mint
-    counter = db.increment_location_counter(
+    counter = await db.async_increment_location_counter(
         latitude, longitude,
         location_name=loc["location_name"],
         province=loc["province"],
@@ -234,7 +235,7 @@ async def upload_and_create(
         "golden_line": golden_line,
         "call_to_action": call_to_action_val,
     }
-    db.insert_collectible(collectible_data)
+    await db.async_insert_collectible(collectible_data)
 
     # Parse generate options
     gen_opts = {
@@ -288,7 +289,8 @@ async def _run_generation(collectible_id: str, location_style: str, lat: float, 
         "current_phase_index": 0,
         "phases": GENERATION_PHASES,
     }
-    _generation_states[collectible_id] = state
+    async with _generation_lock:
+        _generation_states[collectible_id] = state
 
     try:
         # Phase 0: queued (already done, move to phase 1)
@@ -306,7 +308,7 @@ async def _run_generation(collectible_id: str, location_style: str, lat: float, 
         )
 
         if image_url:
-            db.update_collectible(collectible_id, {
+            await db.async_update_collectible(collectible_id, {
                 "hero_url": image_url,
                 "thumbnail_url": image_url,
                 "share_url": image_url,
@@ -323,7 +325,7 @@ async def _run_generation(collectible_id: str, location_style: str, lat: float, 
         state["current_phase_index"] = 5
 
         # Complete
-        db.update_collectible(collectible_id, {
+        await db.async_update_collectible(collectible_id, {
             "generation_status": "complete",
             "is_featured": True,
         })
@@ -331,7 +333,7 @@ async def _run_generation(collectible_id: str, location_style: str, lat: float, 
         state["current_phase_index"] = 5
 
     except Exception as e:
-        db.update_collectible(collectible_id, {
+        await db.async_update_collectible(collectible_id, {
             "generation_status": "failed",
         })
         state["status"] = "failed"
@@ -339,14 +341,16 @@ async def _run_generation(collectible_id: str, location_style: str, lat: float, 
 
 
 @router.get("/{collectible_id}/status", response_model=GenerationStatusOut)
-def get_generation_status(collectible_id: str):
-    item = db.get_collectible_by_id(collectible_id)
+async def get_generation_status(collectible_id: str):
+    item = await db.async_get_collectible_by_id(collectible_id)
     if not item:
         raise HTTPException(status_code=404, detail="刻迹不存在")
 
-    state = _generation_states.get(collectible_id, {})
-    phases = state.get("phases", GENERATION_PHASES)
-    current_idx = state.get("current_phase_index", 0)
+    async with _generation_lock:
+        state = _generation_states.get(collectible_id, {})
+        phases = state.get("phases", GENERATION_PHASES)
+        current_idx = state.get("current_phase_index", 0)
+        error_message = state.get("error_message")
 
     return GenerationStatusOut(
         status=item.get("generation_status", "idle"),
@@ -365,13 +369,13 @@ def get_generation_status(collectible_id: str):
         ],
         current_phase_index=current_idx,
         redirect_collectible_id=collectible_id if item.get("generation_status") == "complete" else None,
-        error_message=state.get("error_message"),
+        error_message=error_message,
     )
 
 
 @router.post("/{collectible_id}/trigger")
 async def trigger_generation(collectible_id: str):
-    item = db.get_collectible_by_id(collectible_id)
+    item = await db.async_get_collectible_by_id(collectible_id)
     if not item:
         raise HTTPException(status_code=404, detail="刻迹不存在")
 
@@ -386,7 +390,7 @@ async def trigger_generation(collectible_id: str):
     if hero_url.startswith("/uploads/") and not hero_url.startswith("/uploads/gen_"):
         photo_path = str(UPLOAD_DIR / hero_url.replace("/uploads/", ""))
 
-    db.update_collectible(collectible_id, {"generation_status": "generating"})
+    await db.async_update_collectible(collectible_id, {"generation_status": "generating"})
     ts = item.get("timestamp", "")
     mn = item.get("mint_number", 0)
     asyncio.create_task(_run_generation(collectible_id, location_style, lat, lng, photo_path, None, ts, mn))

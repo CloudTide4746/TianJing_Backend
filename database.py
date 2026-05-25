@@ -1,13 +1,37 @@
 from __future__ import annotations
 
+import asyncio
+import functools
 import json
 import sqlite3
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 DB_PATH = Path(__file__).parent / "data.db"
+
+# ── Concurrency primitives ──────────────────────────────────────
+_executor = ThreadPoolExecutor(max_workers=4)
+_write_lock = asyncio.Lock()
+
+
+async def _run_in_thread(func, *args, **kwargs):
+    """Offload a sync DB read to the thread pool without serialization."""
+    loop = asyncio.get_running_loop()
+    fn = functools.partial(func, *args, **kwargs)
+    return await loop.run_in_executor(_executor, fn)
+
+
+async def _run_write(func, *args, **kwargs):
+    """Serialize a sync DB write through the asyncio lock, then offload to thread pool."""
+    async with _write_lock:
+        return await _run_in_thread(func, *args, **kwargs)
+
+
+def shutdown_executor():
+    _executor.shutdown(wait=True)
 
 TEXT_FIELDS = (
     "title", "subtitle", "short_description", "site_name", "province", "district",
@@ -271,7 +295,7 @@ def get_or_create_location_counter(lat: float, lng: float) -> dict:
     ).fetchone()
     if not row:
         conn.execute(
-            "INSERT INTO location_counters (location_hash, counter, earliest_imprint) VALUES (?, 0, ?)",
+            "INSERT OR IGNORE INTO location_counters (location_hash, counter, earliest_imprint) VALUES (?, 0, ?)",
             (loc_hash, datetime.now(timezone.utc).strftime("%Y-%m-%d")),
         )
         conn.commit()
@@ -411,3 +435,57 @@ def get_all_location_counters() -> list[dict]:
     rows = conn.execute("SELECT * FROM location_counters WHERE counter > 0 ORDER BY counter DESC").fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ── Async facades (run_in_executor + write lock) ────────────────
+
+async def async_insert_collectible(data: dict) -> dict:
+    return await _run_write(insert_collectible, data)
+
+
+async def async_update_collectible(collectible_id: str, data: dict) -> Optional[dict]:
+    return await _run_write(update_collectible, collectible_id, data)
+
+
+async def async_delete_collectible(collectible_id: str) -> bool:
+    return await _run_write(delete_collectible, collectible_id)
+
+
+async def async_increment_location_counter(lat: float, lng: float, location_name: str = "", province: str = "", district: str = "", era_label: str = "", location_style: str = "terracotta", suggested_kind: str = "ruin") -> dict:
+    return await _run_write(increment_location_counter, lat, lng, location_name, province, district, era_label, location_style, suggested_kind)
+
+
+async def async_update_location_counter_meta(lat: float, lng: float, location_name: str = "", province: str = "", district: str = "", era_label: str = "", location_style: str = "terracotta", suggested_kind: str = "ruin") -> dict:
+    return await _run_write(update_location_counter_meta, lat, lng, location_name, province, district, era_label, location_style, suggested_kind)
+
+
+async def async_increment_view_count(collectible_id: str) -> None:
+    return await _run_write(increment_view_count, collectible_id)
+
+
+async def async_toggle_favorite(collectible_id: str) -> Optional[bool]:
+    return await _run_write(toggle_favorite, collectible_id)
+
+
+async def async_get_collectible_by_id(collectible_id: str) -> Optional[dict]:
+    return await _run_in_thread(get_collectible_by_id, collectible_id)
+
+
+async def async_list_collectibles(kind: Optional[str] = None, status: Optional[str] = None, sort: str = "newest", limit: int = 50, offset: int = 0) -> list[dict]:
+    return await _run_in_thread(list_collectibles, kind=kind, status=status, sort=sort, limit=limit, offset=offset)
+
+
+async def async_count_collectibles(kind: Optional[str] = None, status: Optional[str] = None) -> int:
+    return await _run_in_thread(count_collectibles, kind=kind, status=status)
+
+
+async def async_get_or_create_location_counter(lat: float, lng: float) -> dict:
+    return await _run_in_thread(get_or_create_location_counter, lat, lng)
+
+
+async def async_get_location_counter(lat: float, lng: float) -> dict:
+    return await _run_in_thread(get_location_counter, lat, lng)
+
+
+async def async_get_all_location_counters() -> list[dict]:
+    return await _run_in_thread(get_all_location_counters)
