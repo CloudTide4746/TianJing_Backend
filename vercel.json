@@ -6,11 +6,10 @@
       "use": "@vercel/python"
     }
   ],
-  "routes": [
+  "rewrites": [
     {
-      "src": "/(.*)",
-      "dest": "main.handler",
-      "rewrite": true
+      "source": "/(.*)",
+      "destination": "main.handler"
     }
   ]
 }
