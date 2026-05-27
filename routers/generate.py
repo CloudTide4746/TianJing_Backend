@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 import json
 import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -37,6 +39,9 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 _generation_states: dict[str, dict] = {}
 _generation_lock = asyncio.Lock()
 
+# Thread pool for CPU-bound image operations
+_image_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="img_worker")
+
 GENERATION_PHASES = [
     {"id": "queued", "label": "锚定时空坐标", "detail": "系统正在锁定GPS、时间戳与气象数据，建立不可篡改的时空锚点。", "progress": 0.08, "tone": "textSecondary", "status": "queued", "duration_ms": 800, "can_cancel": True},
     {"id": "analyze", "label": "识别地点气质", "detail": "AI 正在分析地点类型、地貌特征与人文属性，确定视觉风格。", "progress": 0.24, "tone": "gold", "status": "generating", "duration_ms": 1400, "can_cancel": True},
@@ -45,6 +50,13 @@ GENERATION_PHASES = [
     {"id": "seal", "label": "封印金句", "detail": "AI 基于地点与时间生成一行独属于此刻的金句，写入卡面底部。", "progress": 0.92, "tone": "success", "status": "generating", "duration_ms": 2000, "can_cancel": False},
     {"id": "complete", "label": "印记铸造完成", "detail": "刻迹已存入收藏库，可查看完整卡面并分享。", "progress": 1.0, "tone": "success", "status": "complete", "duration_ms": 500, "can_cancel": False},
 ]
+
+
+async def _run_in_thread(func, *args, **kwargs):
+    """Offload a sync function to the image thread pool without blocking the event loop."""
+    loop = asyncio.get_running_loop()
+    fn = functools.partial(func, *args, **kwargs)
+    return await loop.run_in_executor(_image_executor, fn)
 
 
 @router.post("/upload", response_model=UploadResponse)
@@ -84,12 +96,16 @@ async def upload_and_create(
     print(f"[DEBUG UPLOAD] photo saved to: {filepath}")
 
     # Convert to PNG for reliable loading (handles HEIC, etc.)
-    photo_path_for_gen = convert_upload_to_png(str(filepath))
+    # CPU-bound PIL work: offload to thread pool so event loop stays free
+    photo_path_for_gen = await _run_in_thread(convert_upload_to_png, str(filepath))
 
-    # Fetch location + weather + AQI
-    loc = await reverse_geocode(latitude, longitude)
-    weather = await get_weather(latitude, longitude)
-    aqi_data = await get_aqi(latitude, longitude)
+    # Run all 3 external API calls concurrently — they each use independent httpx clients
+    # so they won't block each other. This is the main latency saver.
+    loc, weather, aqi_data = await asyncio.gather(
+        reverse_geocode(latitude, longitude),
+        get_weather(latitude, longitude),
+        get_aqi(latitude, longitude),
+    )
 
     # Increment location counter for real mint
     counter = await db.async_increment_location_counter(

@@ -19,6 +19,7 @@ except Exception:
     pass
 
 from database import init_db, shutdown_executor
+from routers.generate import _image_executor
 from routers import collectibles, location, generate, qrcode
 
 app = FastAPI(title="刻迹 API", version="1.0.0")
@@ -49,6 +50,7 @@ def on_startup():
 @app.on_event("shutdown")
 def on_shutdown():
     shutdown_executor()
+    _image_executor.shutdown(wait=True)
 
 
 @app.get("/api/health")
