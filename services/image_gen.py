@@ -13,7 +13,9 @@ Prompt weight hierarchy:
 from __future__ import annotations
 
 import asyncio
+import functools
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from google import genai
@@ -39,6 +41,16 @@ UPLOAD_DIR = Path(__file__).parent.parent / "uploads"
 
 _client: genai.Client | None = None
 _client_lock = asyncio.Lock()
+
+# Thread pool for CPU-bound PIL operations and sync HTTP calls
+_io_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="img_io")
+
+
+async def _run_in_thread(func, *args, **kwargs):
+    """Offload a sync function to a thread pool without blocking the event loop."""
+    loop = asyncio.get_running_loop()
+    fn = functools.partial(func, *args, **kwargs)
+    return await loop.run_in_executor(_io_executor, fn)
 
 
 async def _get_client() -> genai.Client:
@@ -370,12 +382,18 @@ async def _generate_and_save(
     aspect_ratio: str = "16:9",
     image_size: str = "2K",
 ) -> str:
-    """Call gemini image model via DMXAPI — matches the user's DMXAPI example pattern."""
+    """Call gemini image model via DMXAPI — matches the user's DMXAPI example pattern.
+
+    The sync parts (photo load, image save) are offloaded to a thread pool so
+    the event loop stays free to handle other requests.
+    """
     client = await _get_client()
+
+    # Load photo in thread pool — PIL Image.open() is CPU-bound sync
+    photo = await _run_in_thread(_load_photo, photo_path)
 
     # Build contents in the EXACT pattern from DMXAPI example: [prompt] + images
     images = []
-    photo = _load_photo(photo_path)
     if photo is not None:
         images.append(photo)
         print(f"[DEBUG] Adding photo to contents, total images: {len(images)}")
@@ -403,7 +421,8 @@ async def _generate_and_save(
             image = part.as_image()
             filename = f"gen_{uuid.uuid4().hex}.png"
             filepath = UPLOAD_DIR / filename
-            image.save(str(filepath))
+            # Save in thread pool — PIL Image.save() is CPU-bound sync
+            await _run_in_thread(image.save, str(filepath))
             print(f"[DEBUG] Generated image saved: {filepath}")
             return f"/uploads/{filename}"
 
