@@ -140,6 +140,7 @@ async def upload_and_create(
             wind_direction=weather["wind_direction"],
             wind_level=weather["wind_level"],
             message=message,
+            imprint_title=imprintTitle,
             ai_poetry=ai_poetry_enabled,
         )
     except Exception:

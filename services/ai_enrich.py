@@ -64,6 +64,7 @@ async def enrich_spacetime_imprint(
     wind_direction: str,
     wind_level: int,
     message: str = "",
+    imprint_title: str = "",
     ai_poetry: bool = False,
 ) -> dict:
     """Call DMXAPI to generate artistic metadata for a spacetime imprint."""
@@ -98,11 +99,14 @@ async def enrich_spacetime_imprint(
     system_prompt = (
         f'{SYSTEM_PROMPT_BASE}\n\n'
         f'输出格式：严格的JSON，不要包含任何其他文字。\n\n'
+        f'重要规则：\n'
+        f'1. 如果用户提供了"印记标题"，必须在生成的"subtitle"、"short_description"、"story"、"golden_line"中自然融入该标题的意境或关键词。\n'
+        f'2. "title"字段：如果用户给了标题就用用户的，否则由AI生成一个融合地点+天气+时间感的诗意标题（8-16字）。\n\n'
         f'{{\n'
-        f'  "title": "刻迹标题（8-16字，有诗意，融合地点名+天气+时间感）",\n'
-        f'  "subtitle": "副标题（6-12字）",\n'
+        f'  "title": "刻迹标题（用户给了就用用户的，否则AI生成8-16字融合地点+天气+时间感的诗意标题）",\n'
+        f'  "subtitle": "副标题（6-12字），若用户给了印记标题则需与其意境关联",\n'
         f'  "short_description": "一行简短描述（15-30字），包含年代、天气、温度",\n'
-        f'  "story": "2-3句话的故事叙述（60-120字），从第一人称视角描述站在此地的感受，融入历史感和天气氛围",\n'
+        f'  "story": "2-3句话的故事叙述（60-120字），从第一人称视角描述站在此地的感受，融入历史感和天气氛围，若用户给了标题或留言则需与其关联",\n'
         f'  {golden_line_instruction},\n'
         f'  {call_to_action_instruction},\n'
         f'  "tags": ["标签1", "标签2", "标签3"],\n'
@@ -121,7 +125,8 @@ async def enrich_spacetime_imprint(
 空气质量：{aqi_level}
 风向：{wind_direction}
 风力：{wind_level}级
-用户留言：{message if message else "无"}"""
+用户设定的印记标题：{imprint_title if imprint_title else "（无，用户希望AI生成）"}
+用户留言：{message if message else "（无）"}"""
 
     payload = {
         "model": DMXAPI_MODEL,
