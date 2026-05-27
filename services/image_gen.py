@@ -384,8 +384,8 @@ async def _generate_and_save(
 ) -> str:
     """Call gemini image model via DMXAPI — matches the user's DMXAPI example pattern.
 
-    The sync parts (photo load, image save) are offloaded to a thread pool so
-    the event loop stays free to handle other requests.
+    All blocking operations (PIL load/save, HTTP request) run in the thread pool
+    so the event loop stays free to handle other requests.
     """
     client = await _get_client()
 
@@ -403,17 +403,21 @@ async def _generate_and_save(
     contents = [prompt] + images
     print(f"[DEBUG] Contents: prompt + {len(images)} image(s)")
 
-    response = client.models.generate_content(
-        model=DMXAPI_MODEL,
-        contents=contents,
-        config=types.GenerateContentConfig(
-            response_modalities=['IMAGE'],
-            image_config=types.ImageConfig(
-                aspect_ratio=aspect_ratio,
-                image_size=image_size,
+    # The entire generate_content call is sync blocking HTTP I/O — must run in thread pool
+    def _do_generate():
+        return client.models.generate_content(
+            model=DMXAPI_MODEL,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                response_modalities=['IMAGE'],
+                image_config=types.ImageConfig(
+                    aspect_ratio=aspect_ratio,
+                    image_size=image_size,
+                ),
             ),
-        ),
-    )
+        )
+
+    response = await _run_in_thread(_do_generate)
 
     # Parse response — extract the generated image
     for part in response.parts:
